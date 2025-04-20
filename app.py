@@ -1,9 +1,15 @@
 import streamlit as st
-import requests
 import pandas as pd
-from bs4 import BeautifulSoup
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 import re
 from datetime import datetime
+import requests
 
 # Streamlit page configuration
 st.set_page_config(page_title="Amazon Book Reviews Extractor", layout="wide")
@@ -21,58 +27,73 @@ def clean_text(text):
     text = re.sub(r'\s+', ' ', text.strip())
     return text
 
-# Function to scrape Amazon reviews
+# Function to scrape Amazon reviews using Selenium
 def scrape_reviews(asin):
     try:
+        # Set up Selenium with headless Chrome
+        chrome_options = Options()
+        chrome_options.add_argument("--headless")  # Run in headless mode
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+        
         # Explicitly use the specified URL format
         url = f"https://www.amazon.com/product-reviews/{asin}"
         st.write(f"Scraping URL: {url}")
         
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Connection': 'keep-alive'
-        }
-        response = requests.get(url, headers=headers, timeout=15)
-        response.raise_for_status()
+        driver.get(url)
         
-        # Debugging: Log response details
-        st.write(f"Response status code: {response.status_code}")
-        st.write(f"Response content length: {len(response.text)} bytes")
+        # Wait for reviews to load (up to 10 seconds)
+        try:
+            WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, 'div[data-hook="review"], div.a-section.review'))
+            )
+        except:
+            st.warning("Reviews not loaded within 10 seconds. Checking for CAPTCHA or no reviews.")
         
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Check for CAPTCHA or bot detection
-        captcha = soup.select_one('form[action="/errors/validateCaptcha"]')
-        if captcha:
-            st.error("CAPTCHA detected. Amazon is blocking the request. Consider using a proxy or Selenium.")
+        # Check for CAPTCHA
+        if driver.find_elements(By.CSS_SELECTOR, 'form[action="/errors/validateCaptcha"]'):
+            st.error("CAPTCHA detected. Amazon is blocking the request. Try manually visiting the URL or use a proxy.")
+            driver.quit()
             return []
         
         # Debugging: Log page title
-        title = soup.select_one('title')
-        st.write(f"Page title: {title.get_text() if title else 'No title found'}")
+        title = driver.title
+        st.write(f"Page title: {title if title else 'No title found'}")
         
         # Find review elements
-        review_elements = soup.select('div[data-hook="review"]')
+        review_elements = driver.find_elements(By.CSS_SELECTOR, 'div[data-hook="review"]')
         if not review_elements:
             st.warning("No review elements found with 'div[data-hook=\"review\"]'. Trying fallback selectors.")
-            # Fallback selectors
-            review_elements = soup.select('div.a-section.review, div.review, div.a-row.a-spacing-none')
+            review_elements = driver.find_elements(By.CSS_SELECTOR, 'div.a-section.review, div.review')
         
         reviews = []
         for element in review_elements:
-            username = element.select_one('span.a-profile-name, div.a-profile-content span')
-            username = clean_text(username.get_text()) if username else "Anonymous"
-            
-            comment_text = element.select_one('span[data-hook="review-body"], div.review-text')
-            comment_text = clean_text(comment_text.get_text()) if comment_text else ""
-            
-            rating = element.select_one('i[data-hook="review-star-rating"] span.a-icon-alt, i.review-rating span')
-            rating = clean_text(rating.get_text().split()[0]) if rating else "N/A"
-            
-            date = element.select_one('span[data-hook="review-date"], span.review-date')
-            date = clean_text(date.get_text()) if date else "N/A"
+            try:
+                username = element.find_element(By.CSS_SELECTOR, 'span.a-profile-name, div.a-profile-content span')
+                username = clean_text(username.text) if username else "Anonymous"
+            except:
+                username = "Anonymous"
+                
+            try:
+                comment_text = element.find_element(By.CSS_SELECTOR, 'span[data-hook="review-body"], div.review-text')
+                comment_text = clean_text(comment_text.text) if comment_text else ""
+            except:
+                comment_text = ""
+                
+            try:
+                rating = element.find_element(By.CSS_SELECTOR, 'i[data-hook="review-star-rating"] span.a-icon-alt, i.review-rating span')
+                rating = clean_text(rating.text.split()[0]) if rating else "N/A"
+            except:
+                rating = "N/A"
+                
+            try:
+                date = element.find_element(By.CSS_SELECTOR, 'span[data-hook="review-date"], span.review-date')
+                date = clean_text(date.text) if date else "N/A"
+            except:
+                date = "N/A"
             
             if comment_text:
                 reviews.append({
@@ -84,18 +105,16 @@ def scrape_reviews(asin):
                 })
         
         if not reviews:
-            st.warning("No valid reviews extracted. Possible reasons: no reviews exist, incorrect selectors, or page requires JavaScript.")
+            st.warning("No valid reviews extracted. Possible reasons: no reviews exist or page requires further interaction.")
         else:
             st.success(f"Found {len(reviews)} reviews.")
+        
+        driver.quit()
         return reviews
-    except requests.exceptions.HTTPError as e:
-        st.error(f"HTTP error: {str(e)}")
-        return []
-    except requests.exceptions.RequestException as e:
-        st.error(f"Network error: {str(e)}")
-        return []
     except Exception as e:
-        st.error(f"Unexpected error: {str(e)}")
+        st.error(f"Error during scraping: {str(e)}")
+        if 'driver' in locals():
+            driver.quit()
         return []
 
 # Function to call Gemini API for sentiment analysis
@@ -167,18 +186,19 @@ st.sidebar.markdown(
     ```
     3. Install required packages:
     ```
-    pip install streamlit requests pandas beautifulsoup4 openpyxl
+    pip install streamlit pandas selenium webdriver-manager openpyxl requests
     ```
-    4. Run the app:
+    4. Ensure Google Chrome is installed.
+    5. Run the app:
     ```
     streamlit run app.py
     ```
-    5. Enter a valid 10-character ASIN (e.g., B0CW1LJXKN).
-    6. The app scrapes reviews from `https://www.amazon.com/product-reviews/<ASIN>`.
-    7. If no reviews are found:
+    6. Enter a valid 10-character ASIN (e.g., B0CW1LJXKN).
+    7. The app scrapes reviews from `https://www.amazon.com/product-reviews/<ASIN>` using Selenium.
+    8. If no reviews are found:
        - Verify reviews exist by visiting the URL in your browser.
-       - Check for CAPTCHA or bot detection in debug messages.
-       - Inspect the page's HTML to update selectors if needed.
-    8. For persistent issues, consider using Selenium for dynamic content or a proxy for bot detection.
+       - Check for CAPTCHA in debug messages.
+       - Ensure reviews are not paginated or hidden (Selenium loads only the first page).
+    9. For CAPTCHA issues, try a proxy or manual browser interaction.
     """
 )
