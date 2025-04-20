@@ -6,14 +6,14 @@ import re
 from datetime import datetime
 
 # Streamlit page configuration
-st.set_page_config(page_title="Amazon Book Comments Extractor", layout="wide")
+st.set_page_config(page_title="Amazon Book Reviews Extractor", layout="wide")
 
 # Title and description
-st.title("Amazon Book Comments Extractor")
+st.title("Amazon Book Reviews Extractor")
 st.markdown("Extract user reviews for a specific book from Amazon using its ASIN and export them to Excel.")
 
 # Input fields
-asin = st.text_input("Enter the book's ASIN (e.g., B08N5WRWNW):", placeholder="10-character ASIN")
+asin = st.text_input("Enter the book's ASIN (e.g., B0CW1LJXKN):", placeholder="10-character ASIN")
 submit_button = st.button("Extract Reviews")
 
 # Function to clean text
@@ -25,15 +25,27 @@ def clean_text(text):
 def scrape_reviews(asin):
     try:
         url = f"https://www.amazon.com/product-reviews/{asin}/"
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-        response = requests.get(url, headers=headers)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+        }
+        response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
+        # Debugging: Log page title to confirm correct page
+        title = soup.select_one('title')
+        st.write(f"Page title: {title.get_text() if title else 'No title found'}")
+        
         # Find review elements
         review_elements = soup.select('div[data-hook="review"]')
-        reviews = []
+        if not review_elements:
+            st.warning("No review elements found with 'div[data-hook=\"review\"]'. Trying fallback selector.")
+            # Fallback selector
+            review_elements = soup.select('div.a-section.review')
         
+        reviews = []
         for element in review_elements:
             username = element.select_one('span.a-profile-name')
             username = clean_text(username.get_text()) if username else "Anonymous"
@@ -56,9 +68,16 @@ def scrape_reviews(asin):
                     'ASIN': asin
                 })
         
+        if not reviews:
+            st.warning("No valid reviews extracted. Check if reviews exist or update selectors.")
+        else:
+            st.success(f"Found {len(reviews)} reviews.")
         return reviews
+    except requests.exceptions.RequestException as e:
+        st.error(f"Network error: {str(e)}")
+        return []
     except Exception as e:
-        st.error(f"Error scraping reviews: {str(e)}")
+        st.error(f"Unexpected error: {str(e)}")
         return []
 
 # Function to call Gemini API for sentiment analysis
@@ -117,16 +136,25 @@ if submit_button and asin:
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     )
             else:
-                st.warning("No reviews found or error occurred during extraction.")
+                st.warning("No reviews found or error occurred during extraction. Check debug messages above.")
 
-# Instructions for secrets
+# Instructions for secrets and setup
 st.sidebar.markdown("""
 ### Setup Instructions
-1. Create a `secrets.toml` file in the `.streamlit` directory.
+1. Create a `.streamlit/secrets.toml` file in your project directory.
 2. Add your Gemini API key:
 ```toml
 GEMINI_API_KEY = "your_api_key_here"
 ```
-3. Ensure the ASIN is a valid 10-character Amazon identifier.
-4. The app is tailored for Amazon's review page structure as of April 2025.
+3. Install required packages:
+```bash
+pip install streamlit requests pandas beautifulsoup4 openpyxl
+```
+4. Run the app:
+```bash
+streamlit run streamlit_app.py
+```
+5. Enter a valid 10-character ASIN (e.g., B0CW1LJXKN).
+6. If no reviews are found, check the Amazon review page (`https://www.amazon.com/product-reviews/<ASIN>/`) in your browser to confirm reviews exist.
+7. If the selector fails, inspect the page's HTML and update the `scrape_reviews` function with new selectors.
 """)
