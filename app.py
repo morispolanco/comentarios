@@ -10,6 +10,8 @@ from webdriver_manager.chrome import ChromeDriverManager
 import re
 from datetime import datetime
 import requests
+import subprocess
+import os
 
 # Streamlit page configuration
 st.set_page_config(page_title="Amazon Book Reviews Extractor", layout="wide")
@@ -27,17 +29,41 @@ def clean_text(text):
     text = re.sub(r'\s+', ' ', text.strip())
     return text
 
+# Function to check Chrome version
+def get_chrome_version():
+    try:
+        result = subprocess.run(['google-chrome', '--version'], capture_output=True, text=True)
+        version = result.stdout.strip()
+        st.write(f"Installed Chrome version: {version}")
+        return version
+    except Exception as e:
+        st.error(f"Error checking Chrome version: {str(e)}")
+        return None
+
 # Function to scrape Amazon reviews using Selenium
 def scrape_reviews(asin):
+    driver = None
     try:
+        # Log Chrome version
+        get_chrome_version()
+        
         # Set up Selenium with headless Chrome
         chrome_options = Options()
-        chrome_options.add_argument("--headless")  # Run in headless mode
+        chrome_options.add_argument("--headless")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         
-        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+        # Initialize ChromeDriver
+        st.write("Initializing ChromeDriver...")
+        driver = webdriver.Chrome(
+            service=Service(ChromeDriverManager().install()),
+            options=chrome_options
+        )
+        
+        # Log ChromeDriver version
+        driver_version = driver.capabilities['chrome']['chromedriverVersion'].split()[0]
+        st.write(f"ChromeDriver version: {driver_version}")
         
         # Explicitly use the specified URL format
         url = f"https://www.amazon.com/product-reviews/{asin}"
@@ -45,13 +71,13 @@ def scrape_reviews(asin):
         
         driver.get(url)
         
-        # Wait for reviews to load (up to 10 seconds)
+        # Wait for reviews to load (up to 15 seconds)
         try:
-            WebDriverWait(driver, 10).until(
+            WebDriverWait(driver, 15).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, 'div[data-hook="review"], div.a-section.review'))
             )
         except:
-            st.warning("Reviews not loaded within 10 seconds. Checking for CAPTCHA or no reviews.")
+            st.warning("Reviews not loaded within 15 seconds. Checking for CAPTCHA or no reviews.")
         
         # Check for CAPTCHA
         if driver.find_elements(By.CSS_SELECTOR, 'form[action="/errors/validateCaptcha"]'):
@@ -109,13 +135,13 @@ def scrape_reviews(asin):
         else:
             st.success(f"Found {len(reviews)} reviews.")
         
-        driver.quit()
         return reviews
     except Exception as e:
         st.error(f"Error during scraping: {str(e)}")
-        if 'driver' in locals():
-            driver.quit()
         return []
+    finally:
+        if driver:
+            driver.quit()
 
 # Function to call Gemini API for sentiment analysis
 def analyze_sentiment(comment):
@@ -188,7 +214,12 @@ st.sidebar.markdown(
     ```
     pip install streamlit pandas selenium webdriver-manager openpyxl requests
     ```
-    4. Ensure Google Chrome is installed.
+    4. Install Google Chrome and dependencies (Linux):
+    ```
+    sudo apt-get update
+    sudo apt-get install -y google-chrome-stable
+    sudo apt-get install -y libxss1 libappindicator1 libindicator7
+    ```
     5. Run the app:
     ```
     streamlit run app.py
@@ -198,7 +229,7 @@ st.sidebar.markdown(
     8. If no reviews are found:
        - Verify reviews exist by visiting the URL in your browser.
        - Check for CAPTCHA in debug messages.
-       - Ensure reviews are not paginated or hidden (Selenium loads only the first page).
+       - Ensure Chrome and ChromeDriver are compatible.
     9. For CAPTCHA issues, try a proxy or manual browser interaction.
     """
 )
