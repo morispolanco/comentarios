@@ -6,58 +6,59 @@ import re
 from datetime import datetime
 
 # Streamlit page configuration
-st.set_page_config(page_title="Product Comments Extractor", layout="wide")
+st.set_page_config(page_title="Amazon Book Comments Extractor", layout="wide")
 
 # Title and description
-st.title("Product Comments Extractor")
-st.markdown("Extract user comments for a specific product from a webpage and export them to Excel.")
+st.title("Amazon Book Comments Extractor")
+st.markdown("Extract user reviews for a specific book from Amazon using its ASIN and export them to Excel.")
 
 # Input fields
-url = st.text_input("Enter the product webpage URL:", placeholder="https://example.com/product")
-product_name = st.text_input("Enter the product name:", placeholder="e.g., Wireless Headphones")
-submit_button = st.button("Extract Comments")
+asin = st.text_input("Enter the book's ASIN (e.g., B08N5WRWNW):", placeholder="10-character ASIN")
+submit_button = st.button("Extract Reviews")
 
 # Function to clean text
 def clean_text(text):
     text = re.sub(r'\s+', ' ', text.strip())
     return text
 
-# Function to scrape comments (customize based on webpage structure)
-def scrape_comments(url):
+# Function to scrape Amazon reviews
+def scrape_reviews(asin):
     try:
+        url = f"https://www.amazon.com/product-reviews/{asin}/"
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Example: Adjust selector based on actual webpage structure
-        comment_elements = soup.select('div.review, div.comment, article.comment')
-        comments = []
+        # Find review elements
+        review_elements = soup.select('div[data-hook="review"]')
+        reviews = []
         
-        for element in comment_elements:
-            username = element.select_one('.username, .author, .user')
+        for element in review_elements:
+            username = element.select_one('span.a-profile-name')
             username = clean_text(username.get_text()) if username else "Anonymous"
             
-            comment_text = element.select_one('.comment-text, .review-body, .content')
+            comment_text = element.select_one('span[data-hook="review-body"]')
             comment_text = clean_text(comment_text.get_text()) if comment_text else ""
             
-            rating = element.select_one('.rating, .stars, .score')
-            rating = clean_text(rating.get_text()) if rating else "N/A"
+            rating = element.select_one('i[data-hook="review-star-rating"] span.a-icon-alt')
+            rating = clean_text(rating.get_text().split()[0]) if rating else "N/A"
             
-            date = element.select_one('.date, .timestamp, .posted-date')
+            date = element.select_one('span[data-hook="review-date"]')
             date = clean_text(date.get_text()) if date else "N/A"
             
             if comment_text:
-                comments.append({
+                reviews.append({
                     'Username': username,
                     'Comment': comment_text,
                     'Rating': rating,
-                    'Date': date
+                    'Date': date,
+                    'ASIN': asin
                 })
         
-        return comments
+        return reviews
     except Exception as e:
-        st.error(f"Error scraping comments: {str(e)}")
+        st.error(f"Error scraping reviews: {str(e)}")
         return []
 
 # Function to call Gemini API for sentiment analysis
@@ -68,7 +69,7 @@ def analyze_sentiment(comment):
         headers = {'Content-Type': 'application/json'}
         data = {
             "contents": [{
-                "parts": [{"text": f"Analyze the sentiment of this comment: '{comment}'. Return 'Positive', 'Negative', or 'Neutral'."}]
+                "parts": [{"text": f"Analyze the sentiment of this book review: '{comment}'. Return 'Positive', 'Negative', or 'Neutral'."}]
             }]
         }
         
@@ -82,37 +83,41 @@ def analyze_sentiment(comment):
         return "Neutral"
 
 # Main logic
-if submit_button and url and product_name:
-    with st.spinner("Extracting comments..."):
-        comments = scrape_comments(url)
-        
-        if comments:
-            # Add sentiment analysis
-            for comment in comments:
-                comment['Sentiment'] = analyze_sentiment(comment['Comment'])
+if submit_button and asin:
+    # Validate ASIN format (10 characters, alphanumeric)
+    if not re.match(r'^[A-Z0-9]{10}$', asin):
+        st.error("Please enter a valid 10-character ASIN.")
+    else:
+        with st.spinner("Extracting reviews..."):
+            reviews = scrape_reviews(asin)
             
-            # Create DataFrame
-            df = pd.DataFrame(comments)
-            
-            # Display results
-            st.subheader(f"Comments for {product_name}")
-            st.dataframe(df)
-            
-            # Export to Excel
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{product_name.replace(' ', '_')}_comments_{timestamp}.xlsx"
-            df.to_excel(filename, index=False)
-            
-            # Provide download button
-            with open(filename, "rb") as file:
-                st.download_button(
-                    label="Download Excel file",
-                    data=file,
-                    file_name=filename,
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-        else:
-            st.warning("No comments found or error occurred during extraction.")
+            if reviews:
+                # Add sentiment analysis
+                for review in reviews:
+                    review['Sentiment'] = analyze_sentiment(review['Comment'])
+                
+                # Create DataFrame
+                df = pd.DataFrame(reviews)
+                
+                # Display results
+                st.subheader(f"Reviews for Book (ASIN: {asin})")
+                st.dataframe(df)
+                
+                # Export to Excel
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"amazon_book_{asin}_reviews_{timestamp}.xlsx"
+                df.to_excel(filename, index=False)
+                
+                # Provide download button
+                with open(filename, "rb") as file:
+                    st.download_button(
+                        label="Download Excel file",
+                        data=file,
+                        file_name=filename,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                    )
+            else:
+                st.warning("No reviews found or error occurred during extraction.")
 
 # Instructions for secrets
 st.sidebar.markdown("""
@@ -122,6 +127,6 @@ st.sidebar.markdown("""
 ```toml
 GEMINI_API_KEY = "your_api_key_here"
 ```
-3. Ensure the webpage URL contains user comments in a scrapable format.
-4. Adjust the CSS selectors in the `scrape_comments` function if needed for the target website.
+3. Ensure the ASIN is a valid 10-character Amazon identifier.
+4. The app is tailored for Amazon's review page structure as of April 2025.
 """)
