@@ -37,15 +37,18 @@ def get_chrome_version():
         st.write(f"Installed Chrome version: {version}")
         return version
     except Exception as e:
-        st.error(f"Error checking Chrome version: {str(e)}")
+        st.error(f"Error checking Chrome version: {str(e)}. Ensure Google Chrome is installed.")
         return None
 
 # Function to scrape Amazon reviews using Selenium
 def scrape_reviews(asin):
     driver = None
     try:
-        # Log Chrome version
-        get_chrome_version()
+        # Check Chrome installation
+        chrome_version = get_chrome_version()
+        if not chrome_version:
+            st.error("Google Chrome is not installed. Please install it using: sudo apt-get install -y google-chrome-stable")
+            return []
         
         # Set up Selenium with headless Chrome
         chrome_options = Options()
@@ -82,7 +85,6 @@ def scrape_reviews(asin):
         # Check for CAPTCHA
         if driver.find_elements(By.CSS_SELECTOR, 'form[action="/errors/validateCaptcha"]'):
             st.error("CAPTCHA detected. Amazon is blocking the request. Try manually visiting the URL or use a proxy.")
-            driver.quit()
             return []
         
         # Debugging: Log page title
@@ -217,8 +219,10 @@ st.sidebar.markdown(
     4. Install Google Chrome and dependencies (Linux):
     ```
     sudo apt-get update
-    sudo apt-get install -y google-chrome-stable
-    sudo apt-get install -y libxss1 libappindicator1 libindicator7
+    sudo apt-get install -y wget unzip libxss1 libappindicator1 libindicator7 libnss3 libx11-xcb1 libasound2 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0
+    wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+    sudo dpkg -i google-chrome-stable_current_amd64.deb
+    sudo apt-get install -f -y
     ```
     5. Run the app:
     ```
@@ -229,7 +233,8 @@ st.sidebar.markdown(
     8. If no reviews are found:
        - Verify reviews exist by visiting the URL in your browser.
        - Check for CAPTCHA in debug messages.
-       - Ensure Chrome and ChromeDriver are compatible.
+       - Ensure Chrome and ChromeDriver are installed (run `google-chrome --version`).
     9. For CAPTCHA issues, try a proxy or manual browser interaction.
+    10. For Docker/Streamlit Cloud, use a custom Dockerfile with Chrome installed.
     """
 )
