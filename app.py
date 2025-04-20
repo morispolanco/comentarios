@@ -157,14 +157,28 @@ if submit_button and asin:
                 st.warning("No reviews found or error occurred during extraction. Check debug messages above.")
 
 # Instructions for secrets and setup
-st.sidebar.markdown("""
-### Setup Instructions
-1. Create a `.streamlit/secrets.toml` file in your project directory.
-2. Add your Gemini API key:
-```toml
-GEMINI_API_KEY = "your_api_key_here"
-```
-3. Install required packages:
-```bash
-pip install streamlit requests pandas beautifulsoup4 openpyxl
-```
+st.sidebar.markdown(
+    """
+    ### Setup Instructions
+    1. Create a `.streamlit/secrets.toml` file in your project directory.
+    2. Add your Gemini API key:
+    ```
+    GEMINI_API_KEY = "your_api_key_here"
+    ```
+    3. Install required packages:
+    ```
+    pip install streamlit requests pandas beautifulsoup4 openpyxl
+    ```
+    4. Run the app:
+    ```
+    streamlit run app.py
+    ```
+    5. Enter a valid 10-character ASIN (e.g., B0CW1LJXKN).
+    6. The app scrapes reviews from `https://www.amazon.com/product-reviews/<ASIN>`.
+    7. If no reviews are found:
+       - Verify reviews exist by visiting the URL in your browser.
+       - Check for CAPTCHA or bot detection in debug messages.
+       - Inspect the page's HTML to update selectors if needed.
+    8. For persistent issues, consider using Selenium for dynamic content or a proxy for bot detection.
+    """
+)
