@@ -24,39 +24,54 @@ def clean_text(text):
 # Function to scrape Amazon reviews
 def scrape_reviews(asin):
     try:
-        url = f"https://www.amazon.com/product-reviews/{asin}/"
+        # Explicitly use the specified URL format
+        url = f"https://www.amazon.com/product-reviews/{asin}"
+        st.write(f"Scraping URL: {url}")
+        
         headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
             'Accept-Language': 'en-US,en;q=0.9',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Connection': 'keep-alive'
         }
-        response = requests.get(url, headers=headers, timeout=10)
+        response = requests.get(url, headers=headers, timeout=15)
         response.raise_for_status()
+        
+        # Debugging: Log response details
+        st.write(f"Response status code: {response.status_code}")
+        st.write(f"Response content length: {len(response.text)} bytes")
+        
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Debugging: Log page title to confirm correct page
+        # Check for CAPTCHA or bot detection
+        captcha = soup.select_one('form[action="/errors/validateCaptcha"]')
+        if captcha:
+            st.error("CAPTCHA detected. Amazon is blocking the request. Consider using a proxy or Selenium.")
+            return []
+        
+        # Debugging: Log page title
         title = soup.select_one('title')
         st.write(f"Page title: {title.get_text() if title else 'No title found'}")
         
         # Find review elements
         review_elements = soup.select('div[data-hook="review"]')
         if not review_elements:
-            st.warning("No review elements found with 'div[data-hook=\"review\"]'. Trying fallback selector.")
-            # Fallback selector
-            review_elements = soup.select('div.a-section.review')
+            st.warning("No review elements found with 'div[data-hook=\"review\"]'. Trying fallback selectors.")
+            # Fallback selectors
+            review_elements = soup.select('div.a-section.review, div.review, div.a-row.a-spacing-none')
         
         reviews = []
         for element in review_elements:
-            username = element.select_one('span.a-profile-name')
+            username = element.select_one('span.a-profile-name, div.a-profile-content span')
             username = clean_text(username.get_text()) if username else "Anonymous"
             
-            comment_text = element.select_one('span[data-hook="review-body"]')
+            comment_text = element.select_one('span[data-hook="review-body"], div.review-text')
             comment_text = clean_text(comment_text.get_text()) if comment_text else ""
             
-            rating = element.select_one('i[data-hook="review-star-rating"] span.a-icon-alt')
+            rating = element.select_one('i[data-hook="review-star-rating"] span.a-icon-alt, i.review-rating span')
             rating = clean_text(rating.get_text().split()[0]) if rating else "N/A"
             
-            date = element.select_one('span[data-hook="review-date"]')
+            date = element.select_one('span[data-hook="review-date"], span.review-date')
             date = clean_text(date.get_text()) if date else "N/A"
             
             if comment_text:
@@ -69,10 +84,13 @@ def scrape_reviews(asin):
                 })
         
         if not reviews:
-            st.warning("No valid reviews extracted. Check if reviews exist or update selectors.")
+            st.warning("No valid reviews extracted. Possible reasons: no reviews exist, incorrect selectors, or page requires JavaScript.")
         else:
             st.success(f"Found {len(reviews)} reviews.")
         return reviews
+    except requests.exceptions.HTTPError as e:
+        st.error(f"HTTP error: {str(e)}")
+        return []
     except requests.exceptions.RequestException as e:
         st.error(f"Network error: {str(e)}")
         return []
@@ -150,11 +168,3 @@ GEMINI_API_KEY = "your_api_key_here"
 ```bash
 pip install streamlit requests pandas beautifulsoup4 openpyxl
 ```
-4. Run the app:
-```bash
-streamlit run streamlit_app.py
-```
-5. Enter a valid 10-character ASIN (e.g., B0CW1LJXKN).
-6. If no reviews are found, check the Amazon review page (`https://www.amazon.com/product-reviews/<ASIN>/`) in your browser to confirm reviews exist.
-7. If the selector fails, inspect the page's HTML and update the `scrape_reviews` function with new selectors.
-""")
